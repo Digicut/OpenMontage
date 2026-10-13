@@ -65,7 +65,7 @@ jobs:
               '```',
               '',
               'Review differences before any merge:',
-              'https://github.com/calesthio/OpenMontage/compare/' + forkHead + '...main',
+              'https://github.com/calesthio/OpenMontage/commits/main/',
               '',
               '**Safety:** This workflow does not merge, pull, install dependencies, deploy, or alter office/laptop installations. Any update requires manual review and approval.',
             ].join('\n');
