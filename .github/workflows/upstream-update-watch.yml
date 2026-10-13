@@ -1,0 +1,78 @@
+name: OpenMontage upstream update watch
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-update-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Digicut fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch upstream main (read only)
+        run: git fetch --no-tags https://github.com/calesthio/OpenMontage.git main:refs/remotes/upstream/main
+
+      - name: Check commits and maintain a single tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const run = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const upstreamHead = run('rev-parse', 'refs/remotes/upstream/main');
+            const forkHead = run('rev-parse', 'HEAD');
+            const count = Number(run('rev-list', '--count', 'HEAD..refs/remotes/upstream/main'));
+            const title = '[OpenMontage] Upstream updates awaiting review';
+            const { owner, repo } = context.repo;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'all', per_page: 100
+            });
+            const existing = issues.find(x => !x.pull_request && x.title === title);
+            if (!count) {
+              core.info('No upstream commits are missing from the fork.');
+              if (existing && existing.state === 'open') {
+                await github.rest.issues.update({
+                  owner, repo, issue_number: existing.number, state: 'closed',
+                  body: 'The fork currently contains all upstream commits. No automatic updates were applied.\n\nFork HEAD: ' + forkHead + '\nUpstream HEAD: ' + upstreamHead
+                });
+              }
+              return;
+            }
+            const recent = run('log', '--format=%h %s', '--max-count=15', 'HEAD..refs/remotes/upstream/main');
+            const body = [
+              '## Upstream updates detected',
+              '',
+              '**Missing upstream commits:** ' + count,
+              '**Fork HEAD:** `' + forkHead + '`',
+              '**Upstream HEAD:** `' + upstreamHead + '`',
+              '',
+              '### Recent upstream changes',
+              '```text',
+              recent,
+              '```',
+              '',
+              'Review differences before any merge:',
+              'https://github.com/calesthio/OpenMontage/compare/' + forkHead + '...main',
+              '',
+              '**Safety:** This workflow does not merge, pull, install dependencies, deploy, or alter office/laptop installations. Any update requires manual review and approval.',
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, state: 'open', body
+              });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body });
+            }
